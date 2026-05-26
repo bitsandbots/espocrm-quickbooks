@@ -41,6 +41,23 @@ if [[ -z "$ESPO_PATH" ]]; then
 fi
 
 ##############################################################################
+# PHP VERSION CHECK
+##############################################################################
+
+_blue "Checking PHP version..."
+
+PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo "0.0")
+PHP_MAJOR=$(echo "$PHP_VERSION" | cut -d. -f1)
+PHP_MINOR=$(echo "$PHP_VERSION" | cut -d. -f2)
+
+if [[ "$PHP_MAJOR" -lt 8 ]] || { [[ "$PHP_MAJOR" -eq 8 ]] && [[ "$PHP_MINOR" -lt 3 ]]; }; then
+  _red "ERROR: PHP 8.3+ is required (found PHP $PHP_VERSION)"
+  exit 1
+fi
+
+_green "PHP $PHP_VERSION — OK"
+
+##############################################################################
 # VALIDATION
 ##############################################################################
 
@@ -121,10 +138,12 @@ _blue "Running system rebuild..."
 
 cd "$ESPO_PATH"
 
-if php command.php rebuild 2>&1 | grep -q "Rebuild succeeded"; then
+REBUILD_OUTPUT=$(php command.php rebuild 2>&1)
+if echo "$REBUILD_OUTPUT" | grep -q "Rebuild succeeded"; then
   _green "  Rebuild succeeded"
 else
   _red "ERROR: Rebuild failed — check EspoCRM logs for details"
+  echo "$REBUILD_OUTPUT"
   exit 1
 fi
 
@@ -146,12 +165,12 @@ echo "2. Enter QuickBooks credentials:"
 _yellow "   Admin > Integrations > QuickBooks"
 _yellow "   Enter Client ID, Client Secret, and Default QB Item ID, then click Connect."
 _yellow "   Redirect URI to register in your Intuit developer app:"
-_yellow "     {siteUrl}?entryPoint=QuickBooksOauthCallback"
+_yellow "     {siteUrl}/?entryPoint=QuickBooksOauthCallback"
 echo ""
 echo "3. Enable scheduled jobs:"
 _yellow "   Admin > Scheduled Jobs — enable:"
-echo "     - SyncFromQuickBooks  (nightly pull)"
-echo "     - ReconcileQuickBooks (nightly conflict resolution, run 15 min after sync)"
+echo "     - QuickBooks: Sync from QuickBooks  (recommended: 0 2 * * *)"
+echo "     - QuickBooks: Reconcile             (recommended: 0 3 * * *)"
 echo ""
 echo "4. HTTPS requirement:"
 _yellow "   QuickBooks OAuth requires HTTPS."

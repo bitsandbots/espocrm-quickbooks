@@ -143,16 +143,17 @@ class QuickBooksOauthCallback implements EntryPoint
         $color = $success ? '#2b7de9' : '#c0392b';
         $origin = rtrim($this->config->get('siteUrl') ?? '', '/');
         $originJs = json_encode($origin);
+        $messageSafe = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
 
         $html = <<<HTML
 <!DOCTYPE html>
 <html>
 <head><title>QuickBooks Connection</title></head>
 <body style="font-family:sans-serif;text-align:center;padding:40px;">
-  <p style="color:{$color};font-size:16px;">{$message}</p>
+  <p style="color:{$color};font-size:16px;">{$messageSafe}</p>
   <script>
     if (window.opener) {
-      window.opener.postMessage({name:'quickBooksOAuth',status:'{$status}'}, '*');
+      window.opener.postMessage({name:'quickBooksOAuth',status:'{$status}'}, {$originJs});
       setTimeout(function(){ window.close(); }, 1500);
     }
   </script>

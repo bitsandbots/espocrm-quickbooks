@@ -5,8 +5,9 @@ set -euo pipefail
 # Package the EspoCRM QuickBooks module into a versioned ZIP archive.
 # Usage: ./scripts/release.sh [--version X.Y.Z] [--espo-path PATH] [--skip-tests] [--skip-transpile]
 #
-# --espo-path  Path to an EspoCRM installation (needed for tests and transpilation).
-#              Defaults to $HOME/espocrm if present.
+# --version        Override version (default: latest git tag, or "0.0.0-dev").
+# --espo-path      Path to an EspoCRM installation (needed for tests and transpilation).
+#                  Defaults to $HOME/espocrm if present.
 # --skip-tests     Skip PHPUnit test run.
 # --skip-transpile Skip JS transpilation step.
 #
@@ -66,6 +67,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       _red "ERROR: Unknown option: $1"
+      echo "Usage: $0 [--version X.Y.Z] [--espo-path PATH] [--skip-tests] [--skip-transpile]"
       exit 1
       ;;
   esac
@@ -91,7 +93,7 @@ _green "Release version: $VERSION"
 
 if [[ ! -d "$ESPO_PATH" ]]; then
   _red "ERROR: EspoCRM path does not exist: $ESPO_PATH"
-  _yellow "Pass --espo-path /path/to/espocrm or set ESPO_PATH environment variable."
+  _yellow "Pass --espo-path /path/to/espocrm to specify the EspoCRM installation."
   exit 1
 fi
 
@@ -146,15 +148,20 @@ if [[ "$SKIP_TESTS" == false ]]; then
     exit 1
   fi
 
+  PHPUNIT_LOG="${PROJECT_ROOT}/.release-phpunit-$$.log"
+
   if ESPO_PATH="$ESPO_PATH" php "$PHPUNIT" \
       --configuration "${PROJECT_ROOT}/phpunit.xml" \
-      --no-coverage 2>&1 | tee /tmp/phpunit-qb-output.log; then
+      --no-coverage 2>&1 | tee "$PHPUNIT_LOG"; then
     _green "PHP tests passed"
   else
     _red "ERROR: PHP tests failed"
-    tail -20 /tmp/phpunit-qb-output.log
+    tail -20 "$PHPUNIT_LOG"
+    rm -f "$PHPUNIT_LOG"
     exit 1
   fi
+
+  rm -f "$PHPUNIT_LOG"
 else
   _yellow "Skipping tests (--skip-tests)"
 fi
@@ -180,6 +187,16 @@ _green "  Staging install script..."
 mkdir -p "$STAGING_DIR/scripts"
 cp "${PROJECT_ROOT}/scripts/install.sh" "$STAGING_DIR/scripts/install.sh"
 chmod +x "$STAGING_DIR/scripts/install.sh"
+
+if [[ -f "${PROJECT_ROOT}/README.md" ]]; then
+  _green "  Staging README..."
+  cp "${PROJECT_ROOT}/README.md" "$STAGING_DIR/README.md"
+fi
+
+if [[ -f "${PROJECT_ROOT}/LICENSE" ]]; then
+  _green "  Staging LICENSE..."
+  cp "${PROJECT_ROOT}/LICENSE" "$STAGING_DIR/LICENSE"
+fi
 
 if [[ -d "${PROJECT_ROOT}/docs" ]]; then
   _green "  Staging documentation..."
@@ -236,7 +253,7 @@ echo "  Version:   $VERSION"
 echo "  Checksum:  $CHECKSUM"
 echo ""
 _blue "Deployment:"
-_yellow "scp $ZIP_FILE user@server:/tmp/"
-_yellow "cd /path/to/espocrm && unzip -o /tmp/$(basename "$ZIP_FILE")"
-_yellow "./scripts/install.sh --espo-path /path/to/espocrm"
+_yellow "  scp $ZIP_FILE user@server:/tmp/"
+_yellow "  unzip -o /tmp/$(basename "$ZIP_FILE") -d /tmp/qb-module"
+_yellow "  bash /tmp/qb-module/scripts/install.sh --espo-path /path/to/espocrm"
 echo ""

@@ -19,12 +19,8 @@ Bidirectional sync between EspoCRM and QuickBooks Online.
 **From a release ZIP:**
 
 ```bash
-# Extract the ZIP in your EspoCRM root
-cd /path/to/espocrm
-unzip espocrm-quickbooks-v*.zip
-
-# Run the installer
-bash scripts/install.sh --espo-path /path/to/espocrm
+unzip espocrm-quickbooks-v*.zip -d /tmp/qb-module
+bash /tmp/qb-module/scripts/install.sh --espo-path /path/to/espocrm
 ```
 
 **From source:**
@@ -32,19 +28,19 @@ bash scripts/install.sh --espo-path /path/to/espocrm
 ```bash
 git clone https://github.com/coreconduit/espocrm-quickbooks.git
 cd espocrm-quickbooks
-scripts/install.sh --espo-path /path/to/espocrm
+bash scripts/install.sh --espo-path /path/to/espocrm
 ```
 
 ## Configuration
 
 1. Register a QuickBooks developer app at [developer.intuit.com](https://developer.intuit.com).
-2. Add a redirect URI: `https://your-espocrm-domain.com?entryPoint=QuickBooksOauthCallback`
+2. Add a redirect URI: `https://your-espocrm-domain.com/?entryPoint=QuickBooksOauthCallback`
 3. In EspoCRM: **Admin → Integrations → QuickBooks**
    - Enter **Client ID**, **Client Secret**, and **Default QB Item ID**
-   - Click **Connect** — you will be redirected to QuickBooks to authorize
+   - Click **Save**, then **Connect to QuickBooks** — authorize in the popup
 4. Enable scheduled jobs: **Admin → Scheduled Jobs**
-   - `SyncFromQuickBooks` — nightly pull of QB Customers and Payments
-   - `ReconcileQuickBooks` — nightly conflict resolution (run 15 min after sync)
+   - `QuickBooks: Sync from QuickBooks` — nightly pull of QB Customers and Payments (2 AM)
+   - `QuickBooks: Reconcile` — nightly conflict resolution (3 AM, after sync)
 5. Configure cron (once per minute, as the web server user):
    ```
    * * * * * www-data php /path/to/espocrm/cron.php > /dev/null 2>&1
@@ -54,7 +50,7 @@ scripts/install.sh --espo-path /path/to/espocrm
 
 | EspoCRM Field | QuickBooks Field |
 |---|---|
-| Account.name | Customer.DisplayName |
+| Account.name | Customer.DisplayName / CompanyName |
 | Account.qbCustomerId | Customer.Id |
 | Contact.name | Customer.DisplayName |
 | Invoice.amount | Invoice total |
@@ -68,8 +64,7 @@ New fields added to Account and Contact: `qbCustomerId`, `qbCustomerSyncToken`, 
 Tests require a local EspoCRM installation for the `Espo\Core\*` namespace:
 
 ```bash
-php /path/to/espocrm/vendor/bin/phpunit \
-    --bootstrap /path/to/espocrm/vendor/autoload.php \
+ESPO_PATH=/path/to/espocrm php /path/to/espocrm/vendor/bin/phpunit \
     --configuration phpunit.xml \
     --no-coverage
 ```
@@ -79,15 +74,16 @@ Expected: 39 tests, 0 failures.
 To build a release ZIP:
 
 ```bash
-scripts/release.sh --version 1.0.0 --espo-path /path/to/espocrm
+./scripts/release.sh --version 1.0.0 --espo-path /path/to/espocrm
 # Output: releases/espocrm-quickbooks-v1.0.0.zip
 ```
 
 ## Documentation
 
-- [Integration architecture & sync mechanics](docs/quickbooks-integration.md)
-- [Setup & deployment guide](docs/setup.md)
 - [System architecture](docs/architecture.md)
+- [Integration reference — field maps, API, conflict resolution](docs/quickbooks-integration.md)
+- [Setup & deployment guide](docs/setup.md)
+- [Gap analysis — implemented features and open issues](docs/gap-analysis.md)
 - [Module internals](custom/Espo/Modules/QuickBooks/README.md)
 
 ## License
