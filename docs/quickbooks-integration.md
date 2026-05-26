@@ -1,168 +1,239 @@
-# QuickBooks Integration — Module Reference
+# QuickBooks Integration Reference
 
-## Overview
+## Integration Entity Fields
 
-The QuickBooks module (`custom/Espo/Modules/QuickBooks/`) provides bidirectional sync between EspoCRM and QuickBooks Online (QBO) via the QBO REST API v3.
+Stored on the `Integration` entity with ID `QuickBooks`.
 
-**What syncs:**
+| Field | Type | Purpose |
+|-------|------|---------|
+| `clientId` | varchar | Intuit developer app Client ID |
+| `clientSecret` | password | Intuit developer app Client Secret (encrypted at rest) |
+| `realmId` | varchar | QB Company ID — set automatically by OAuth |
+| `accessToken` | text | Current OAuth access token (1-hour lifetime) |
+| `refreshToken` | text | Long-lived refresh token (100-day lifetime) |
+| `accessTokenExpiresAt` | datetime | Token expiry — refreshed 30 seconds before expiry |
+| `connectedAt` | datetime | Timestamp of last successful OAuth authorization |
+| `lastSyncAt` | datetime | Timestamp when `SyncFromQuickBooks` last completed |
+| `lastSyncError` | text | Most recent job error string (null on clean run) |
+| `defaultItemId` | varchar | Fallback QB Item ID for invoices without line items |
+| `oauthState` | varchar | Ephemeral CSRF token — cleared after use |
 
-| EspoCRM | QB Online | Direction | Trigger |
-|---------|-----------|-----------|---------|
-| Account | Customer | → (push) | afterSave hook |
-| Contact | Customer | → (push) | afterSave hook |
-| Account | Customer | ← (pull) | Nightly job |
-| Invoice (custom) | Invoice | → (push) | afterSave hook |
-| — | Payment | ← (pull) | Nightly job → sets Invoice.status=Paid |
+---
 
-## File Reference
+## Sync Matrix
 
-```
-Services/QuickBooksService.php     Core: all QB API calls + token refresh
-EntryPoints/QuickBooksOauthCallback.php  OAuth2 redirect handler
-Hooks/Account/Sync.php             Account afterSave hook
-Hooks/Contact/Sync.php             Contact afterSave hook
-Hooks/Invoice/Sync.php             Invoice afterSave hook
-Jobs/SyncFromQuickBooks.php        Nightly pull (customers + payments)
-Jobs/ReconcileQuickBooks.php       Nightly reconciliation push
-Tools/ConflictResolver.php         Conflict resolution logic
-Entities/Invoice.php               Invoice entity class
-Resources/metadata/integrations/QuickBooks.json   Admin UI config
-Resources/metadata/entityDefs/Account.json        QB fields on Account
-Resources/metadata/entityDefs/Contact.json        QB fields on Contact
-Resources/metadata/entityDefs/Invoice.json        Invoice entity schema
-```
+| EspoCRM Entity | QB Entity | Direction | Trigger |
+|---------------|-----------|-----------|---------|
+| Account | Customer | EspoCRM → QB | `afterSave` hook (real-time) |
+| Account | Customer | QB → EspoCRM | `SyncFromQuickBooks` job (nightly) |
+| Contact | Customer | EspoCRM → QB | `afterSave` hook (real-time) |
+| Invoice | Invoice | EspoCRM → QB | `afterSave` hook (real-time) |
+| Invoice (status=Voided) | Invoice (void) | EspoCRM → QB | `afterSave` hook when status transitions to Voided |
+| QB Payment | Invoice.status=Paid | QB → EspoCRM | `SyncFromQuickBooks` job (nightly) |
+
+---
+
+## QB Fields Added to EspoCRM Entities
+
+### Account
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `qbCustomerId` | varchar(64) | QB `Customer.Id` |
+| `qbCustomerSyncToken` | varchar(32) | QB optimistic concurrency token |
+| `qbSyncedAt` | datetime | Timestamp of last successful sync to QB |
+
+### Contact
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `qbCustomerId` | varchar(64) | QB `Customer.Id` |
+| `qbCustomerSyncToken` | varchar(32) | QB optimistic concurrency token |
+| `qbSyncedAt` | datetime | Timestamp of last successful sync to QB |
+
+### Invoice
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `qbInvoiceId` | varchar(64) | QB `Invoice.Id` |
+| `qbInvoiceSyncToken` | varchar(32) | QB optimistic concurrency token |
+| `qbSyncedAt` | datetime | Timestamp of last successful sync to QB |
+| `qbPaymentId` | varchar(64) | QB `Payment.Id` (set when payment pulled from QB) |
+| `qbPaymentDate` | date | QB payment transaction date |
+
+---
 
 ## QuickBooksService API
 
+All methods are on `Espo\Modules\QuickBooks\Services\QuickBooksService`.
+
 ### `upsertCustomer(string $entityType, Entity $entity): void`
 
-Maps an Account or Contact to a QB Customer and creates or updates it.
+Creates or sparse-updates a QB Customer from an EspoCRM Account or Contact.
 
-- If `$entity->get('qbCustomerId')` is null → POST (create)
-- If set → POST with `Id` + `SyncToken` (QB uses POST for updates with sparse flag)
-- Writes `qbCustomerId`, `qbCustomerSyncToken`, `qbSyncedAt` back to entity
-- Saves with `skipQuickBooksSync=true` to prevent hook re-entry
-
-**Field mapping:**
-
-| EspoCRM | QB Customer |
-|---------|------------|
-| `name` (Account) | `CompanyName`, `DisplayName` |
-| `firstName` + `lastName` (Contact) | `GivenName`, `FamilyName`, `DisplayName` |
-| `emailAddress` | `PrimaryEmailAddr.Address` |
-| `phoneNumber` | `PrimaryPhone.FreeFormNumber` |
-| `website` | `WebAddr.URI` |
-| `billingAddress*` | `BillAddr.*` |
+- If `qbCustomerId` and `qbCustomerSyncToken` are set on the entity, sends a sparse update (includes `Id`, `SyncToken`, `sparse: true`). Otherwise creates new.
+- Saves `qbCustomerId`, `qbCustomerSyncToken`, and `qbSyncedAt` back to the entity using `['skipQuickBooksSync' => true, 'silent' => true]`.
+- Throws `Error` if integration is disabled.
 
 ### `upsertInvoice(Entity $invoice): void`
 
-Maps an EspoCRM Invoice to a QB Invoice. Requires the linked Account to have a `qbCustomerId`.
+Creates or sparse-updates a QB Invoice.
 
-- Resolves `CustomerRef` from Account's `qbCustomerId`
-- Maps `lineItems` JSON array → QB `Line[]` with `SalesItemLineDetail`
-- Falls back to a single line with `amount` if `lineItems` is empty
-- Writes `qbInvoiceId`, `qbInvoiceSyncToken`, `qbSyncedAt` back to entity
+- Requires the invoice's linked Account to have a `qbCustomerId`. Throws `Error` if missing ("sync the Account first").
+- Builds line items from `invoice.lineItems` JSON array. Falls back to a single line using `invoice.amount` if no line items.
+- Per-item: uses `item.qbItemId` if set, otherwise falls back to Integration `defaultItemId`. No `ItemRef` sent if neither is available.
+- Saves `qbInvoiceId`, `qbInvoiceSyncToken`, `qbSyncedAt` back to invoice.
+
+### `voidInvoice(Entity $invoice): void`
+
+Voids a QB Invoice using `POST /invoice?operation=void&minorversion=65`. No-ops silently if `qbInvoiceId` is not set on the invoice (never synced).
 
 ### `pullPaymentsSince(string $sinceDate): void`
 
-Queries QB for all Payments with `TxnDate >= sinceDate`. For each payment:
-1. Finds linked QB Invoice ID from `Line[0].LinkedTxn`
-2. Finds EspoCRM Invoice by `qbInvoiceId`
-3. Sets `status = Paid`, stores `qbPaymentId` and `qbPaymentDate`
+Queries QB: `SELECT * FROM Payment WHERE TxnDate >= '$sinceDate'`. For each payment:
+
+1. Traverses `Line[0].LinkedTxn` for entries with `TxnType = Invoice`.
+2. Finds EspoCRM Invoice where `qbInvoiceId` matches `TxnId`.
+3. Sets `status = Paid`, `qbPaymentId`, `qbPaymentDate`.
 
 ### `pullCustomersSince(string $sinceDate): void`
 
-Queries QB Customers updated since `sinceDate`. For each customer:
-1. Finds EspoCRM Account by `qbCustomerId`
-2. Checks `ConflictResolver` — only updates if QB is newer than `qbSyncedAt`
-3. Updates `name`, `emailAddress`, `phoneNumber`
+Queries QB: `SELECT * FROM Customer WHERE MetaData.LastUpdatedTime >= '$sinceDate'`. For each customer:
 
-### Token Refresh
+1. Finds EspoCRM Account where `qbCustomerId` matches QB `Customer.Id`.
+2. Compares QB `MetaData.LastUpdatedTime` with EspoCRM `qbSyncedAt`.
+3. Skips if QB timestamp ≤ `qbSyncedAt` (EspoCRM already has this state or is newer).
+4. Applies `name`, `emailAddress`, `phoneNumber`; updates `qbCustomerSyncToken` and `qbSyncedAt`.
 
-Tokens refresh automatically inside `getAccessToken()`:
-- Checks `accessTokenExpiresAt` with 30-second margin
-- If expired: HTTP Basic auth POST to `https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer` with `grant_type=refresh_token`
-- Writes new `accessToken` + `accessTokenExpiresAt` to Integration entity
+---
 
-## Hooks
+## Field Mapping
 
-All three hooks follow the same pattern:
+### Account → QB Customer
 
-```php
-public function afterSave(Entity $entity, SaveOptions $options): void
-{
-    if ($options->get('skipQuickBooksSync')) return;  // loop guard
-    try {
-        $service = $this->injectableFactory->create(QuickBooksService::class);
-        $service->upsertCustomer('Account', $entity);
-    } catch (Throwable $e) {
-        $this->log->warning("QB sync failed: " . $e->getMessage());
-        // Does NOT abort the CRM save
-    }
-}
-```
+| EspoCRM Field | QB Field |
+|--------------|---------|
+| `name` | `CompanyName`, `DisplayName` |
+| `emailAddress` | `PrimaryEmailAddr.Address` |
+| `phoneNumber` | `PrimaryPhone.FreeFormNumber` |
+| `website` | `WebAddr.URI` |
+| `billingAddressStreet` | `BillAddr.Line1` |
+| `billingAddressCity` | `BillAddr.City` |
+| `billingAddressState` | `BillAddr.CountrySubDivisionCode` |
+| `billingAddressPostalCode` | `BillAddr.PostalCode` |
+| `billingAddressCountry` | `BillAddr.Country` |
 
-Key properties:
-- `static $order = 20` — runs after EspoCRM's own hooks (typically order 9–11)
-- Failures are swallowed at `warning` level so CRM saves always succeed
-- Hook is skipped if integration is disabled (throws inside `getIntegration()`)
+### Contact → QB Customer
+
+| EspoCRM Field | QB Field |
+|--------------|---------|
+| `firstName` | `GivenName` |
+| `lastName` | `FamilyName` |
+| `firstName` + `lastName` | `DisplayName` (space-joined; falls back to `name`) |
+| `emailAddress` | `PrimaryEmailAddr.Address` |
+| `phoneNumber` | `PrimaryPhone.FreeFormNumber` |
+
+### QB Customer → EspoCRM Account (Pull)
+
+| QB Field | EspoCRM Field |
+|---------|--------------|
+| `CompanyName` or `DisplayName` | `name` |
+| `PrimaryEmailAddr.Address` | `emailAddress` |
+| `PrimaryPhone.FreeFormNumber` | `phoneNumber` |
+| `SyncToken` | `qbCustomerSyncToken` |
+
+---
+
+## QB API Endpoints Used
+
+Base URL: `https://quickbooks.api.intuit.com/v3/company/{realmId}`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/customer` | Create or sparse-update Customer |
+| `POST` | `/invoice` | Create or sparse-update Invoice |
+| `POST` | `/invoice?operation=void&minorversion=65` | Void Invoice |
+| `GET` | `/query?query=SELECT%20*%20FROM%20Payment%20WHERE%20...` | Pull payments by date |
+| `GET` | `/query?query=SELECT%20*%20FROM%20Customer%20WHERE%20...` | Pull customers by last-updated date |
+
+Token endpoint: `https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer`
+
+---
+
+## Conflict Resolution
+
+`ConflictResolver::resolve(?string $qbLastUpdated, ?string $espoSyncedAt): string`
+
+| QB `LastUpdatedTime` | EspoCRM `qbSyncedAt` | Returns |
+|---------------------|---------------------|--------|
+| More recent | — | `WINNER_QB` |
+| Less recent or equal | — | `WINNER_ESPO` |
+| Null | Set | `WINNER_ESPO` |
+| Set | Null | `WINNER_QB` |
+| Null | Null | `WINNER_NONE` |
+
+Helper: `isQbNewer(?string $qbLastUpdated, ?string $espoSyncedAt): bool`
+
+---
 
 ## Background Jobs
 
 ### SyncFromQuickBooks
 
-Reads `lastSyncAt` from Integration entity. Defaults to 7 days ago on first run. After a successful run, writes the current timestamp back to `lastSyncAt`.
+**Class:** `Espo\Modules\QuickBooks\Jobs\SyncFromQuickBooks`
+**Schedule:** Daily at 2 AM (`0 2 * * *`)
+
+1. Reads `lastSyncAt` from Integration entity.
+2. Defaults to 7 days ago on first run.
+3. Pulls customers since that date → applies to Accounts.
+4. Pulls payments since that date → applies to Invoice statuses.
+5. Updates `lastSyncAt` and `lastSyncError` on Integration entity.
 
 ### ReconcileQuickBooks
 
-Finds records where `modifiedAt > qbSyncedAt` (EspoCRM was modified more recently than last sync). Pushes those to QB. Batch size: 50 records per run.
+**Class:** `Espo\Modules\QuickBooks\Jobs\ReconcileQuickBooks`
+**Schedule:** Daily at 3 AM (`0 3 * * *`) — run after SyncFromQuickBooks
 
-## Conflict Resolution
+1. Queries Accounts with `qbCustomerId` set (batch: 50).
+2. Pushes accounts where `modifiedAt > qbSyncedAt`.
+3. Queries non-Paid, non-Voided Invoices with `qbInvoiceId` set (batch: 50).
+4. Pushes invoices where `modifiedAt > qbSyncedAt`.
+5. Stores error summary in `Integration.lastSyncError`.
 
-`Tools/ConflictResolver::resolve(?string $qbLastUpdated, ?string $espoSyncedAt): string`
+---
 
-Returns one of: `WINNER_QB`, `WINNER_ESPO`, `WINNER_NONE`.
+## API Routes
 
-Logic:
-- Both null → NONE
-- Only QB time known → QB wins
-- Only EspoCRM time known → EspoCRM wins
-- Both known → newer timestamp wins; tie goes to EspoCRM
+Registered in `Resources/routes.json`:
 
-## QB API Endpoints Used
+| Method | Route | Controller Action |
+|--------|-------|------------------|
+| `POST` | `/api/v1/QuickBooksIntegration/initOAuth` | `QuickBooksIntegration::postActionInitOAuth` |
+| `POST` | `/api/v1/QuickBooksIntegration/runSync` | `QuickBooksIntegration::postActionRunSync` |
 
-All calls go to: `https://quickbooks.api.intuit.com/v3/company/{realmId}/`
+Both routes require an authenticated admin session (`User::isAdmin()` check in constructor).
 
-| Operation | Method | Path |
-|-----------|--------|------|
-| Create Customer | POST | `customer` |
-| Update Customer | POST | `customer` (with Id + SyncToken in body) |
-| Query Customers | GET | `query?query=SELECT * FROM Customer WHERE ...` |
-| Create Invoice | POST | `invoice` |
-| Update Invoice | POST | `invoice` (with Id + SyncToken) |
-| Query Payments | GET | `query?query=SELECT * FROM Payment WHERE ...` |
-| Ping / verify | GET | `companyinfo/{realmId}` |
+---
 
-All requests require: `Authorization: Bearer {accessToken}`, `Accept: application/json`.
+## Known Limitations
 
-## Integration Entity Fields
+| Limitation | Impact | Priority |
+|-----------|--------|---------|
+| No QB API pagination | Silent data loss when >1000 customers or payments match the since-date query | High |
+| ReconcileQuickBooks batch=50, no offset | Only first 50 stale records reconciled per run | Medium |
+| No disconnect endpoint | Cannot cleanly revoke tokens or switch QB companies from UI | High |
+| No webhook support | QB changes appear in EspoCRM only after nightly pull, not in real-time | Low |
+| No QB→EspoCRM invoice sync | Invoices created in QB are not reflected in EspoCRM | Low |
+| Tax fields not mapped | Invoice tax amounts are not sent to or received from QB | Low |
 
-The `Integration` entity (id=`QuickBooks`) stores all credentials in its `data` JSON column. Access via:
+See `docs/gap-analysis.md` for full details and implementation effort estimates.
 
-```php
-$integration = $this->entityManager->getEntityById(Integration::ENTITY_TYPE, 'QuickBooks');
-$realmId = $integration->get('realmId');
-```
+---
 
-Fields stored: `clientId`, `clientSecret`, `accessToken`, `refreshToken`, `accessTokenExpiresAt`, `realmId`, `connectedAt`, `lastSyncAt`, `oauthState`.
+## Adding Sync for a New Entity
 
-## Adding a New Entity Sync
-
-To add sync for a new EspoCRM entity (e.g., Lead → QB Customer):
-
-1. Add `qbCustomerId`, `qbCustomerSyncToken`, `qbSyncedAt` fields in `Resources/metadata/entityDefs/Lead.json`
-2. Create `Hooks/Lead/Sync.php` — copy Contact hook, change entity type
-3. Extend `QuickBooksService::buildCustomerPayload()` to handle `'Lead'` entity type
-4. Add QB field mappings for Lead-specific fields
-5. Run `php rebuild.php`
-6. Add test coverage in `tests/unit/Espo/Modules/QuickBooks/`
+1. Add QB fields to `Resources/metadata/entityDefs/{Entity}.json` (follow Account pattern).
+2. Create `Hooks/{Entity}/Sync.php` implementing `AfterSave`, with `skipQuickBooksSync` guard.
+3. Add sync method to `QuickBooksService` following `upsertCustomer()` pattern.
+4. Optionally extend `SyncFromQuickBooks::run()` and `ReconcileQuickBooks::run()` for pull/reconcile.
+5. Add side panel to `Resources/metadata/clientDefs/{Entity}.json` if UI status is needed.
