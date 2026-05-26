@@ -139,7 +139,6 @@ if [[ "$SKIP_TESTS" == false ]]; then
   _blue "Running QuickBooks unit tests..."
 
   PHPUNIT="${ESPO_PATH}/vendor/bin/phpunit"
-  BOOTSTRAP="${ESPO_PATH}/vendor/autoload.php"
 
   if [[ ! -f "$PHPUNIT" ]]; then
     _red "ERROR: phpunit not found at $PHPUNIT"
@@ -147,8 +146,7 @@ if [[ "$SKIP_TESTS" == false ]]; then
     exit 1
   fi
 
-  if php "$PHPUNIT" \
-      --bootstrap "$BOOTSTRAP" \
+  if ESPO_PATH="$ESPO_PATH" php "$PHPUNIT" \
       --configuration "${PROJECT_ROOT}/phpunit.xml" \
       --no-coverage 2>&1 | tee /tmp/phpunit-qb-output.log; then
     _green "PHP tests passed"

@@ -1,4 +1,4 @@
-<phpunit defaultTestSuite="unit">
+<phpunit bootstrap="tests/bootstrap.php" defaultTestSuite="unit">
   <testsuites>
     <testsuite name="unit">
       <directory>tests/unit/Espo/Modules/QuickBooks</directory>
