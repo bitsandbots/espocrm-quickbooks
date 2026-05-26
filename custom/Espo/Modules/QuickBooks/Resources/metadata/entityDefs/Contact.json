@@ -1,0 +1,25 @@
+{
+    "fields": {
+        "qbCustomerId": {
+            "type": "varchar",
+            "maxLength": 64,
+            "readOnly": true
+        },
+        "qbCustomerSyncToken": {
+            "type": "varchar",
+            "maxLength": 32,
+            "readOnly": true
+        },
+        "qbSyncedAt": {
+            "type": "datetime",
+            "readOnly": true
+        }
+    },
+    "links": {
+        "invoices": {
+            "type": "hasMany",
+            "entity": "Invoice",
+            "foreign": "contact"
+        }
+    }
+}

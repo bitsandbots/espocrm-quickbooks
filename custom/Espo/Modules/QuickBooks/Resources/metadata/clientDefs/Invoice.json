@@ -1,0 +1,11 @@
+{
+    "controller": "controllers/record",
+    "iconClass": "fas fa-file-invoice-dollar",
+    "views": {
+        "list": "views/record/list",
+        "detail": "views/record/detail",
+        "edit": "views/record/edit"
+    },
+    "defaultSidePanel": "default",
+    "allowInternalNotes": false
+}

@@ -1,0 +1,7 @@
+<phpunit defaultTestSuite="unit">
+  <testsuites>
+    <testsuite name="unit">
+      <directory>tests/unit/Espo/Modules/QuickBooks</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>

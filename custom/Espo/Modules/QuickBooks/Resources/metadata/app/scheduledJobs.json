@@ -1,0 +1,10 @@
+{
+    "SyncFromQuickBooks": {
+        "name": "QuickBooks: Sync from QuickBooks",
+        "jobClassName": "Espo\\Modules\\QuickBooks\\Jobs\\SyncFromQuickBooks"
+    },
+    "ReconcileQuickBooks": {
+        "name": "QuickBooks: Reconcile",
+        "jobClassName": "Espo\\Modules\\QuickBooks\\Jobs\\ReconcileQuickBooks"
+    }
+}

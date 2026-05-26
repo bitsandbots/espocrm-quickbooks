@@ -1,0 +1,4 @@
+releases/
+.release-staging-*/
+/tmp/phpunit-qb-output.log
+.phpunit.result.cache

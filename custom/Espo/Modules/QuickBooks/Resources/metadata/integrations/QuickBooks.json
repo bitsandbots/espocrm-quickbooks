@@ -1,0 +1,42 @@
+{
+    "fields": {
+        "clientId": {
+            "type": "varchar",
+            "required": true,
+            "maxLength": 255
+        },
+        "clientSecret": {
+            "type": "password",
+            "required": true,
+            "maxLength": 255
+        },
+        "realmId": {
+            "type": "varchar",
+            "readOnly": true,
+            "maxLength": 64
+        },
+        "connectedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "lastSyncAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "defaultItemId": {
+            "type": "varchar",
+            "maxLength": 64
+        },
+        "oauthState": {
+            "type": "varchar",
+            "maxLength": 64,
+            "notStorable": false
+        },
+        "lastSyncError": {
+            "type": "text",
+            "readOnly": true
+        }
+    },
+    "allowUserAccounts": false,
+    "view": "quick-books:views/admin/integrations/quick-books"
+}

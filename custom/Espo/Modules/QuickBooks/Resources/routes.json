@@ -1,0 +1,18 @@
+[
+    {
+        "route": "/QuickBooksIntegration/initOAuth",
+        "method": "post",
+        "params": {
+            "controller": "QuickBooksIntegration",
+            "action": "initOAuth"
+        }
+    },
+    {
+        "route": "/QuickBooksIntegration/runSync",
+        "method": "post",
+        "params": {
+            "controller": "QuickBooksIntegration",
+            "action": "runSync"
+        }
+    }
+]

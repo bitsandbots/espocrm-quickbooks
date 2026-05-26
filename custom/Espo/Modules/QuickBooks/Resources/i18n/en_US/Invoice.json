@@ -1,0 +1,28 @@
+{
+    "labels": {
+        "Invoice": "Invoice",
+        "Invoices": "Invoices"
+    },
+    "fields": {
+        "name": "Invoice #",
+        "status": "Status",
+        "amount": "Amount",
+        "dueDate": "Due Date",
+        "lineItems": "Line Items",
+        "account": "Account",
+        "contact": "Contact",
+        "qbInvoiceId": "QB Invoice ID",
+        "qbSyncedAt": "QB Synced At",
+        "qbPaymentId": "QB Payment ID",
+        "qbPaymentDate": "QB Payment Date"
+    },
+    "options": {
+        "status": {
+            "Draft": "Draft",
+            "Sent": "Sent",
+            "Paid": "Paid",
+            "Overdue": "Overdue",
+            "Voided": "Voided"
+        }
+    }
+}
