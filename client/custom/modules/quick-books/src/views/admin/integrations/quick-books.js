@@ -93,7 +93,7 @@ export default class QuickBooksIntegrationView extends IntegrationsEditView {
     }
 
     openOAuthPopup(clientId, siteUrl, state) {
-        const redirectUri = `${siteUrl}/?entryPoint=QuickBooksOauthCallback`;
+        const redirectUri = `${siteUrl}/quickbooks/callback`;
 
         const authUrl =
             'https://appcenter.intuit.com/connect/oauth2' +

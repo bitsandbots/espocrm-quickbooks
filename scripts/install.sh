@@ -139,7 +139,7 @@ _blue "Running system rebuild..."
 cd "$ESPO_PATH"
 
 REBUILD_OUTPUT=$(php command.php rebuild 2>&1)
-if echo "$REBUILD_OUTPUT" | grep -q "Rebuild succeeded"; then
+if echo "$REBUILD_OUTPUT" | grep -qiE "Rebuild (succeeded|has been done)"; then
   _green "  Rebuild succeeded"
 else
   _red "ERROR: Rebuild failed — check EspoCRM logs for details"

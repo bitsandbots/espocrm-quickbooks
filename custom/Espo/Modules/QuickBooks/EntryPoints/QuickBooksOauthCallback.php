@@ -105,7 +105,7 @@ class QuickBooksOauthCallback implements EntryPoint
         $clientId = $integration->get('clientId');
         $clientSecret = $integration->get('clientSecret');
         $siteUrl = rtrim($this->config->get('siteUrl') ?? '', '/');
-        $redirectUri = $siteUrl . '/?entryPoint=QuickBooksOauthCallback';
+        $redirectUri = $siteUrl . '/quickbooks/callback';
 
         $ch = curl_init(self::TOKEN_ENDPOINT);
 
